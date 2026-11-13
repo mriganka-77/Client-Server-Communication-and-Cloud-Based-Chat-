@@ -1,0 +1,20 @@
+[Unit]
+Description=LANChat Server Service
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/chat-app/server
+EnvironmentFile=/home/ubuntu/chat-app/server/.env
+ExecStart=/usr/bin/node index.js
+Restart=always
+RestartSec=3
+
+# Resource limitations and sandboxing
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=chat-server
+
+[Install]
+WantedBy=multi-user.target

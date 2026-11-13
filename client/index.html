@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LANChat — Real-Time Chat</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- ==================== JOIN SCREEN ==================== -->
+  <main id="join-screen" class="screen-container">
+    <div class="card join-card">
+      <div class="brand">
+        <span class="brand-icon">💬</span>
+        <h1 class="brand-title">LANChat</h1>
+        <p class="brand-subtitle">Cloud-Based Chat & Networking Demo</p>
+      </div>
+
+      <form id="join-form" class="join-form" autocomplete="off">
+        <div class="form-group">
+          <label for="nickname-input" class="visually-hidden">Choose a nickname</label>
+          <input
+            type="text"
+            id="nickname-input"
+            class="input-field"
+            placeholder="Enter a nickname…"
+            maxlength="20"
+            autofocus
+            required
+          >
+          <p class="hint-text">2–20 letters, numbers, or underscores.</p>
+        </div>
+
+        <button type="submit" id="join-btn" class="btn btn-primary">Join Chat</button>
+        <div id="join-error" class="error-banner" role="alert" aria-live="assertive"></div>
+      </form>
+    </div>
+  </main>
+
+  <!-- ==================== CHAT SCREEN ==================== -->
+  <section id="chat-screen" class="screen-container hidden" aria-hidden="true">
+    <div class="chat-app-window">
+      <!-- Chat Header -->
+      <header class="chat-header">
+        <div class="header-left">
+          <span class="header-logo">💬</span>
+          <span class="header-title">LANChat</span>
+        </div>
+
+        <div class="header-center">
+          <span id="status-indicator" class="status-indicator status-connecting">
+            <span class="status-dot"></span>
+            <span id="status-text" class="status-text">Connecting…</span>
+          </span>
+        </div>
+
+        <div class="header-right">
+          <span id="online-counter" class="online-counter">1 online</span>
+          <button id="toggle-sidebar-btn" class="btn-icon" aria-label="Toggle online users list">
+            ≡
+          </button>
+        </div>
+      </header>
+
+      <!-- Main Chat Body -->
+      <div class="chat-body">
+        <!-- Message Column -->
+        <div class="chat-main">
+          <div id="messages-container" class="messages-container" role="log" aria-live="polite">
+            <!-- Messages rendered dynamically -->
+          </div>
+
+          <!-- "New messages" pill when scrolled up -->
+          <button id="scroll-bottom-pill" class="scroll-pill hidden" aria-label="Scroll to newest messages">
+            ↓ New messages
+          </button>
+
+          <!-- Typing indicator bar -->
+          <div id="typing-indicator" class="typing-bar hidden" aria-live="polite"></div>
+
+          <!-- Message Composer Form -->
+          <form id="composer-form" class="composer-form" autocomplete="off">
+            <label for="message-input" class="visually-hidden">Type your message</label>
+            <input
+              type="text"
+              id="message-input"
+              class="composer-input"
+              placeholder="Type a message…"
+              maxlength="500"
+              autocomplete="off"
+            >
+            <button type="submit" id="send-btn" class="btn btn-accent" aria-label="Send message">
+              Send
+            </button>
+          </form>
+        </div>
+
+        <!-- Online Users Sidebar -->
+        <aside id="online-sidebar" class="chat-sidebar">
+          <div class="sidebar-header">
+            <h3>Online Users</h3>
+          </div>
+          <ul id="online-users-list" class="online-list">
+            <!-- User items rendered dynamically -->
+          </ul>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <!-- Toast for transient errors (rate limit, etc.) -->
+  <div id="toast" class="toast hidden" role="alert" aria-live="assertive"></div>
+
+  <!-- Load Socket.IO client served directly by the Node.js server -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
