@@ -8,3 +8,4 @@ module.exports = {
   CORS_ORIGIN: process.env.CORS_ORIGIN || '*',
   HISTORY_LIMIT: parseInt(process.env.HISTORY_LIMIT, 10) || 50,
 };
+

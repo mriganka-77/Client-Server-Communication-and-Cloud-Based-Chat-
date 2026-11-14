@@ -18,3 +18,4 @@ SyslogIdentifier=chat-server
 
 [Install]
 WantedBy=multi-user.target
+

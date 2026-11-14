@@ -1,163 +1,103 @@
 const db = require('./db');
-const { validateNickname, isNicknameAvailable, validateMessage } = require('./validators');
 const RateLimiter = require('./rateLimiter');
-const config = require('./config');
 
 function setupSockets(io, onlineUsers) {
-  const rateLimiter = new RateLimiter({ maxMessages: 5, windowMs: 3000 });
+  const rateLimiter = new RateLimiter({ maxMessages: 10, windowMs: 3000 });
 
-  function getOnlineUsernames() {
-    return Array.from(new Set(onlineUsers.values()));
-  }
+  // Socket Authentication Middleware
+  io.use((socket, next) => {
+    const token = socket.handshake.auth ? socket.handshake.auth.token : null;
+    if (!token) {
+      return next(new Error('Authentication required'));
+    }
+
+    const user = db.getSessionUser(token);
+    if (!user) {
+      return next(new Error('Invalid or expired session token'));
+    }
+
+    socket.user = user;
+    next();
+  });
 
   io.on('connection', (socket) => {
-    // 1. Join room
-    socket.on('join', (payload = {}, ack) => {
-      try {
-        const username = payload.username;
-        const validation = validateNickname(username);
-        if (!validation.valid) {
-          if (typeof ack === 'function') ack({ ok: false, error: validation.error });
-          return;
-        }
+    const user = socket.user;
+    onlineUsers.set(user.id, { username: user.username, socketId: socket.id });
 
-        const cleanName = validation.sanitized;
-        if (!isNicknameAvailable(cleanName, onlineUsers)) {
-          if (typeof ack === 'function') {
-            ack({ ok: false, error: 'That nickname is already in use.' });
-          }
-          return;
-        }
+    // Join personal user notification channel
+    socket.join(`user_${user.id}`);
 
-        // Register user
-        onlineUsers.set(socket.id, cleanName);
+    // Join all conversation rooms the user is currently a member of
+    const userRooms = db.getUserRooms(user.id);
+    for (const r of userRooms) {
+      socket.join(r.id);
+    }
 
-        // Fetch history
-        const history = db.getRecentMessages(config.HISTORY_LIMIT);
-        const users = getOnlineUsernames();
+    // Broadcast online status
+    const onlineIds = Array.from(onlineUsers.keys());
+    io.emit('presence', onlineIds);
 
-        // Send confirmation and history to joining socket
-        socket.emit('join:ok', {
-          username: cleanName,
-          history,
-          users,
-        });
-
-        // Broadcast updated user list to all
-        io.emit('users', users);
-
-        // Broadcast system notification to other users
-        const nowIso = new Date().toISOString();
-        socket.broadcast.emit('system', {
-          text: `${cleanName} joined the chat`,
-          createdAt: nowIso,
-        });
-
-        if (typeof ack === 'function') {
-          ack({ ok: true });
-        }
-      } catch (err) {
-        console.error(`Error in 'join' event for socket ${socket.id}:`, err);
-        if (typeof ack === 'function') {
-          ack({ ok: false, error: 'Internal server error while joining.' });
-        }
+    // Client dynamically joins a newly created room channel
+    socket.on('room:join', ({ roomId }) => {
+      if (roomId && db.isUserInRoom(roomId, user.id)) {
+        socket.join(roomId);
       }
     });
 
-    // 2. Chat message
-    socket.on('message', (payload = {}, ack) => {
+    // Encrypted Chat Message
+    socket.on('chat:message', (payload = {}, ack) => {
       try {
-        const username = onlineUsers.get(socket.id);
-        if (!username) {
-          if (typeof ack === 'function') {
-            ack({ ok: false, error: 'You must join before sending messages.' });
-          }
+        const { roomId, ciphertext, iv } = payload;
+
+        if (!roomId || !ciphertext || !iv) {
+          if (typeof ack === 'function') ack({ ok: false, error: 'Malformed encrypted message payload.' });
           return;
         }
 
-        // Rate limiting check
+        if (!db.isUserInRoom(roomId, user.id)) {
+          if (typeof ack === 'function') ack({ ok: false, error: 'Unauthorized to post in this room.' });
+          return;
+        }
+
         if (!rateLimiter.check(socket.id)) {
-          const errMsg = "You're sending messages too fast. Please wait a moment.";
+          const errMsg = "You're sending messages too fast. Please wait.";
           socket.emit('error:msg', { code: 'RATE_LIMIT', message: errMsg });
-          if (typeof ack === 'function') {
-            ack({ ok: false, error: errMsg });
-          }
+          if (typeof ack === 'function') ack({ ok: false, error: errMsg });
           return;
         }
 
-        // Validation
-        const validation = validateMessage(payload.content);
-        if (!validation.valid) {
-          if (typeof ack === 'function') {
-            ack({ ok: false, error: validation.error });
-          }
-          return;
-        }
+        // Save strictly the encrypted ciphertext & IV to the database (Server CANNOT read plaintext)
+        const savedMessage = db.saveMessage(roomId, user.id, ciphertext, iv);
 
-        const cleanContent = validation.sanitized;
-
-        // Persist message
-        const savedMessage = db.saveMessage(username, cleanContent);
-
-        // Broadcast message to everyone
-        io.emit('message', savedMessage);
+        // Broadcast encrypted message to the specific room only
+        io.to(roomId).emit('chat:message', savedMessage);
 
         if (typeof ack === 'function') {
           ack({ ok: true, id: savedMessage.id });
         }
       } catch (err) {
-        console.error(`Error in 'message' event for socket ${socket.id}:`, err);
+        console.error(`Error in chat:message for user ${user.username}:`, err);
         if (typeof ack === 'function') {
-          ack({ ok: false, error: 'Internal server error while sending message.' });
+          ack({ ok: false, error: 'Server error delivering message.' });
         }
       }
     });
 
-    // 3. Typing indicator
-    socket.on('typing', (payload = {}) => {
-      try {
-        const username = onlineUsers.get(socket.id);
-        if (!username) return;
-
-        const isTyping = Boolean(payload.isTyping);
-        socket.broadcast.emit('typing', {
-          username,
-          isTyping,
-        });
-      } catch (err) {
-        console.error(`Error in 'typing' event for socket ${socket.id}:`, err);
-      }
+    // Typing Indicator (scoped to room)
+    socket.on('typing', ({ roomId, isTyping }) => {
+      if (!roomId || !db.isUserInRoom(roomId, user.id)) return;
+      socket.to(roomId).emit('typing', {
+        roomId,
+        username: user.username,
+        isTyping: Boolean(isTyping),
+      });
     });
 
-    // 4. Disconnect
+    // Disconnect
     socket.on('disconnect', () => {
-      try {
-        rateLimiter.remove(socket.id);
-        const username = onlineUsers.get(socket.id);
-
-        if (username) {
-          onlineUsers.delete(socket.id);
-          const users = getOnlineUsernames();
-
-          // Broadcast updated user list
-          io.emit('users', users);
-
-          // Broadcast leave notification
-          const nowIso = new Date().toISOString();
-          io.emit('system', {
-            text: `${username} left the chat`,
-            createdAt: nowIso,
-          });
-
-          // Also cancel any active typing indicator for this user
-          socket.broadcast.emit('typing', {
-            username,
-            isTyping: false,
-          });
-        }
-      } catch (err) {
-        console.error(`Error in 'disconnect' event for socket ${socket.id}:`, err);
-      }
+      rateLimiter.remove(socket.id);
+      onlineUsers.delete(user.id);
+      io.emit('presence', Array.from(onlineUsers.keys()));
     });
   });
 
