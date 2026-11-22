@@ -248,3 +248,4 @@ describe('Auth & End-to-End Encryption (E2EE) Tests', () => {
     assert.strictEqual(bobGroup.encrypted_group_key.ciphertext, 'encKeyForBob');
   });
 });
+

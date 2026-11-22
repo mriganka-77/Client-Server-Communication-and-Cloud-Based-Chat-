@@ -199,3 +199,4 @@ const E2EE = {
     localStorage.setItem(`e2ee_pub_${username.toLowerCase()}`, JSON.stringify(publicKeyJwk));
   },
 };
+
